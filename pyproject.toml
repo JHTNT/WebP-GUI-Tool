@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "webp-gui-tool"
+version = "0.1.0"
+description = ""
+authors = ["JHTNT <jerry1106666@gmail.com>"]
+readme = "README.md"
+packages = [{include = "webp_gui_tool"}]
+
+[tool.poetry.dependencies]
+python = "~3.11"
+pyside6 = "^6.5.2"
+nuitka = "^1.7.9"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
