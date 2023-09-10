@@ -75,6 +75,8 @@ class MainWindow(QMainWindow):
             self, "選擇檔案", filter="圖片 (*.png *.jpg *.jpeg *.tiff *.webp)"
         )
         for file in filename[0]:
+            if file == "":
+                continue
             item = QListWidgetItem()
             widget = FileItem(file)
             item.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
@@ -84,6 +86,8 @@ class MainWindow(QMainWindow):
 
     def add_directory(self):
         dirname = QFileDialog.getExistingDirectory(self, "選擇資料夾")
+        if dirname == "":
+            return
         item = QListWidgetItem()
         widget = FileItem(dirname, True)
         item.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
