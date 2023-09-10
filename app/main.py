@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
             if file == "":
                 continue
             item = QListWidgetItem()
-            widget = FileItem(file)
+            widget = FileItem(self, item, file)
             item.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
             item.setSizeHint(widget.sizeHint())
             self.queueing_files_list.addItem(item)
@@ -89,11 +89,15 @@ class MainWindow(QMainWindow):
         if dirname == "":
             return
         item = QListWidgetItem()
-        widget = FileItem(dirname, True)
+        widget = FileItem(self, item, dirname, True)
         item.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
         item.setSizeHint(widget.sizeHint())
         self.queueing_files_list.addItem(item)
         self.queueing_files_list.setItemWidget(item, widget)
+
+    # called when the remove_button in widget is pressed
+    def remove_list_item(self, item: QListWidgetItem):
+        self.queueing_files_list.takeItem(self.queueing_files_list.indexFromItem(item).row())
 
 
 if __name__ == "__main__":
