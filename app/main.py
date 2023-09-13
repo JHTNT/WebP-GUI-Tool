@@ -1,6 +1,9 @@
+import os
 import sys
 
+from components.dialogs.settings_dialog import SettingsDialog
 from components.widgets.file_item import FileItem
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +26,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.main_widget = QWidget()
+        self.settings_dialog = SettingsDialog(self)
 
         self.settings_button = QPushButton("參數設定", self)
         self.start_button = QPushButton("開始", self)
@@ -41,12 +45,22 @@ class MainWindow(QMainWindow):
         self.main_layout = QVBoxLayout()
         # layout of the buttons at the bottom
         self.function_bar_layout = QHBoxLayout()
+
+        self.cwebp_settings = QSettings("config.ini", QSettings.IniFormat)
+
+        if os.path.exists("./config.ini"):
+            self.apply_settings()
+        else:
+            self.save_settings()
+
         self.init_widget()
         self.init_layout()
         self.init_window()
 
     def init_widget(self):
         self.setCentralWidget(self.main_widget)
+
+        self.settings_button.clicked.connect(self.open_setting)
 
         self.add_file_action.triggered.connect(self.add_file)
         self.add_directory_action.triggered.connect(self.add_directory)
@@ -69,6 +83,19 @@ class MainWindow(QMainWindow):
         self.setMenuBar(self.menubar)
         self.setWindowTitle("WebP GUI tool")
         self.setWindowIcon(QIcon(".\\app\\resources\\logo.ico"))
+
+    def apply_settings(self):
+        self.settings_dialog.quality_spin.setValue(float(self.cwebp_settings.value("quality")))
+        if self.cwebp_settings.value("compress_option") == "lossy":
+            self.settings_dialog.lossy_radio.setChecked(True)
+        if self.cwebp_settings.value("output_option") == "add_subfix":
+            self.settings_dialog.output_add_subfix.setChecked(True)
+        self.settings_dialog.output_subfix_input.setText(self.cwebp_settings.value("output_subfix"))
+        self.settings_dialog.argument_input.setText(self.cwebp_settings.value("other_arguments"))
+
+    def save_settings(self):
+        for key, value in self.settings_dialog.arguments.items():
+            self.cwebp_settings.setValue(key, value)
 
     def add_file(self):
         filename = QFileDialog.getOpenFileNames(
@@ -98,6 +125,9 @@ class MainWindow(QMainWindow):
     # called when the remove_button in widget is pressed
     def remove_list_item(self, item: QListWidgetItem):
         self.queueing_files_list.takeItem(self.queueing_files_list.indexFromItem(item).row())
+
+    def open_setting(self):
+        self.settings_dialog.open()
 
 
 if __name__ == "__main__":
