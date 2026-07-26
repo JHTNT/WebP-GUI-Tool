@@ -11,7 +11,7 @@ struct FileItem {
 };
 
 struct CwebpOptions {
-    int  quality = 75;
+    int  quality = 90;
     bool lossless = false;
     int  near_lossless = -1;  // -1 = unused
     int  z = -1;              // -1 = unused; implies lossless, skips -q/-m

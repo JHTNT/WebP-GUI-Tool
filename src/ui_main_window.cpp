@@ -66,7 +66,7 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     quality_->align(FL_ALIGN_LEFT);
     quality_->bounds(0, 100);
     quality_->step(1);
-    quality_->value(75);
+    quality_->value(90);
 
     adv_toggle_ = new Fl_Toggle_Button(10, 328, 110, 26, "詳細參數 ▸");
 
@@ -195,10 +195,15 @@ int MainWindow::handle(int event) {
     switch (event) {
         case FL_DND_ENTER:
         case FL_DND_DRAG:
+            // Bypassing Fl_Group routing skips belowmouse bookkeeping, but
+            // FLTK delivers FL_DND_RELEASE/FL_PASTE straight to belowmouse
+            Fl::belowmouse(this);
+            return 1;
         case FL_DND_RELEASE:
             return 1;
         case FL_PASTE:
-            add_dropped(std::string(Fl::event_text(), Fl::event_length()));
+            // event_length() can be 0 for DnD paste; rely on NUL termination
+            if (Fl::event_text()) add_dropped(Fl::event_text());
             return 1;
     }
     return Fl_Double_Window::handle(event);

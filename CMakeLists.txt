@@ -5,9 +5,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # The installed FLTKConfig.cmake is broken (references uninstalled demo
-# targets), so locate the static lib and headers directly.
-find_path(FLTK_INCLUDE_DIR FL/Fl.H PATHS "C:/Program Files (x86)/FLTK/include")
-find_library(FLTK_LIBRARY fltk PATHS "C:/Program Files (x86)/FLTK/lib")
+# targets), so locate the static lib and headers directly. The literal
+# path is a fallback hint; override with -DFLTK_INCLUDE_DIR/-DFLTK_LIBRARY
+# or the FLTK_ROOT environment variable.
+find_path(FLTK_INCLUDE_DIR FL/Fl.H
+    PATHS ENV FLTK_ROOT "C:/Program Files (x86)/FLTK" PATH_SUFFIXES include)
+find_library(FLTK_LIBRARY fltk
+    PATHS ENV FLTK_ROOT "C:/Program Files (x86)/FLTK" PATH_SUFFIXES lib)
 if(NOT FLTK_INCLUDE_DIR OR NOT FLTK_LIBRARY)
     message(FATAL_ERROR "FLTK not found (FLTK_INCLUDE_DIR / FLTK_LIBRARY)")
 endif()
