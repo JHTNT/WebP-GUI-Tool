@@ -5,6 +5,7 @@ enum class JobStatus { Pending, Running, Done, Failed, Cancelled };
 
 struct FileItem {
     std::string path_utf8;
+    std::string root_utf8;    // folder it was added from; empty = added as single file
     bool checked = true;
     JobStatus status = JobStatus::Pending;
     std::string error_text;

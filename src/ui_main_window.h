@@ -8,8 +8,9 @@
 #include "cwebp_runner.h"
 #include "job_model.h"
 
+class FileTree;
+class Fl_Tree_Item;
 class Fl_Box;
-class Fl_Browser;
 class Fl_Button;
 class Fl_Check_Button;
 class Fl_Choice;
@@ -29,23 +30,28 @@ public:
     int handle(int event) override;
 
 private:
-    std::string line_for(const FileItem& it) const;
+    std::string label_for(const FileItem& it) const;
     CwebpOptions read_options() const;
     void add_dropped(const std::string& text);
     void add_paths(const std::vector<std::string>& paths_utf8);
-    void rebuild_browser();
+    void rebuild_tree();
+    void refresh_leaf(int idx);
+    void set_all_checked(bool checked);
+    void remove_items(const std::vector<int>& indices);
+    void show_context_menu(Fl_Tree_Item* item);
     void update_idle_status();
     void toggle_advanced();
     void apply_z_state();
     void set_running_ui(bool running);
     void start_conversion();
     void browse_output_dir();
-    void on_browser_click();
+    void on_tree_event();
     void on_msg(const Converter::Msg& m);
     void on_close();
     static void awake_cb(void* p);
 
     std::vector<FileItem> items_;
+    std::vector<Fl_Tree_Item*> leaf_;         // item index -> tree leaf
     std::unordered_set<std::wstring> keys_;   // lowercased paths for dedup
     Converter converter_;
     std::string cwebp_path_;
@@ -53,7 +59,7 @@ private:
 
     Fl_Group* toolbar_;
     Fl_Check_Button* recursive_;
-    Fl_Browser* browser_;
+    FileTree* tree_;
     Fl_Value_Slider* quality_;
     Fl_Toggle_Button* adv_toggle_;
     Fl_Group* adv_group_;

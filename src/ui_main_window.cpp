@@ -1,32 +1,62 @@
 #include "ui_main_window.h"
 
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
-#include <FL/Fl_Browser.H>
 #include <FL/Fl_Button.H>
 #include <FL/Fl_Check_Button.H>
 #include <FL/Fl_Choice.H>
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Int_Input.H>
+#include <FL/Fl_Menu_Item.H>
 #include <FL/Fl_Native_File_Chooser.H>
 #include <FL/Fl_Output.H>
 #include <FL/Fl_Progress.H>
 #include <FL/Fl_Round_Button.H>
 #include <FL/Fl_Spinner.H>
 #include <FL/Fl_Toggle_Button.H>
+#include <FL/Fl_Tree.H>
+#include <FL/Fl_Tree_Item.H>
 #include <FL/Fl_Value_Slider.H>
 #include <FL/fl_ask.H>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cwctype>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <sstream>
+#include <unordered_set>
 
 #include "scanner.h"
+
+namespace fs = std::filesystem;
+
+// Fl_Tree that forwards right-clicks to a context-menu handler
+class FileTree : public Fl_Tree {
+public:
+    FileTree(int X, int Y, int W, int H) : Fl_Tree(X, Y, W, H) {}
+    std::function<void(Fl_Tree_Item*)> on_rclick;
+    int handle(int event) override {
+        if (event == FL_PUSH && Fl::event_button() == FL_RIGHT_MOUSE) {
+            Fl_Tree_Item* it = find_clicked();
+            if (it && it != root() && on_rclick) {
+                select_only(it, 0);
+                on_rclick(it);
+            }
+            return 1;
+        }
+        return Fl_Tree::handle(event);
+    }
+};
 
 namespace {
 constexpr int W = 640;
@@ -41,6 +71,31 @@ std::wstring lc_key(const std::string& utf8) {
                    [](wchar_t c) { return (wchar_t)std::towlower(c); });
     return w;
 }
+
+Fl_Color status_color(JobStatus s) {
+    switch (s) {
+        case JobStatus::Running: return FL_BLUE;
+        case JobStatus::Done: return FL_DARK_GREEN;
+        case JobStatus::Failed: return FL_RED;
+        case JobStatus::Cancelled: return FL_DARK2;
+        default: return FL_FOREGROUND_COLOR;
+    }
+}
+
+// leaf items carry index+1 in user_data; folder nodes carry null
+int leaf_index(const Fl_Tree_Item* it) { return (int)(intptr_t)it->user_data() - 1; }
+
+void collect_leaves(Fl_Tree_Item* it, std::vector<int>& out) {
+    int idx = leaf_index(it);
+    if (idx >= 0) { out.push_back(idx); return; }
+    for (int i = 0; i < it->children(); ++i) collect_leaves(it->child(i), out);
+}
+
+void open_in_explorer(const std::string& path_utf8) {
+    std::wstring p = utf8_to_path(path_utf8).make_preferred().native();
+    ShellExecuteW(nullptr, L"open", L"explorer.exe",
+                  (L"/select,\"" + p + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+}
 }  // namespace
 
 MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
@@ -49,17 +104,16 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     auto* add_dir = new Fl_Button(106, 8, 100, 28, "加入資料夾");
     auto* remove = new Fl_Button(212, 8, 90, 28, "移除勾選");
     auto* clear = new Fl_Button(308, 8, 64, 28, "清空");
-    recursive_ = new Fl_Check_Button(498, 8, 132, 28, "含子資料夾");
+    auto* sel_all = new Fl_Button(378, 8, 52, 28, "全選");
+    auto* sel_none = new Fl_Button(436, 8, 64, 28, "全不選");
+    recursive_ = new Fl_Check_Button(506, 8, 124, 28, "含子資料夾");
     recursive_->value(1);
     toolbar_->end();
 
-    browser_ = new Fl_Browser(10, 48, W - 20, 240);
-    static const int widths[] = {24, 92, 0};
-    browser_->column_widths(widths);
-    browser_->column_char('\t');
-    browser_->type(FL_HOLD_BROWSER);
-    browser_->when(FL_WHEN_RELEASE_ALWAYS);
-    browser_->tooltip("點最左欄勾選/取消;雙擊失敗項目看錯誤訊息;可直接拖入檔案或資料夾");
+    tree_ = new FileTree(10, 48, W - 20, 240);
+    tree_->showroot(0);
+    tree_->item_reselect_mode(FL_TREE_SELECTABLE_ALWAYS);
+    tree_->tooltip("點 ☐ 勾選/取消;右鍵有更多操作;雙擊失敗項目看錯誤訊息;可直接拖入檔案或資料夾");
 
     quality_ = new Fl_Value_Slider(80, 296, W - 90, 24, "品質");
     quality_->type(FL_HOR_SLIDER);
@@ -130,7 +184,7 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     bottom_group_->end();
 
     end();
-    resizable(browser_);
+    resizable(tree_);
     size_range(W, 420, W, 0);   // fixed width, vertical resize only
 
     add_files->callback([](Fl_Widget*, void* d) {
@@ -153,22 +207,25 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     remove->callback([](Fl_Widget*, void* d) {
         auto* w = (MainWindow*)d;
         if (w->converter_.running()) return;
-        std::vector<FileItem> keep;
-        for (auto& it : w->items_) {
-            if (it.checked) w->keys_.erase(lc_key(it.path_utf8));
-            else keep.push_back(std::move(it));
-        }
-        w->items_ = std::move(keep);
-        w->rebuild_browser();
+        std::vector<int> idxs;
+        for (int i = 0; i < (int)w->items_.size(); ++i)
+            if (w->items_[i].checked) idxs.push_back(i);
+        w->remove_items(idxs);
     }, this);
     clear->callback([](Fl_Widget*, void* d) {
         auto* w = (MainWindow*)d;
-        if (w->converter_.running()) return;
+        if (w->converter_.running() || w->items_.empty()) return;
+        if (fl_choice("確定要清空全部 %d 個項目?", "取消", "清空", nullptr,
+                      (int)w->items_.size()) != 1)
+            return;
         w->items_.clear();
         w->keys_.clear();
-        w->rebuild_browser();
+        w->rebuild_tree();
     }, this);
-    browser_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->on_browser_click(); }, this);
+    sel_all->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->set_all_checked(true); }, this);
+    sel_none->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->set_all_checked(false); }, this);
+    tree_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->on_tree_event(); }, this);
+    tree_->on_rclick = [this](Fl_Tree_Item* it) { show_context_menu(it); };
     adv_toggle_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->toggle_advanced(); }, this);
     z_choice_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->apply_z_state(); }, this);
     out_browse_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->browse_output_dir(); }, this);
@@ -209,23 +266,19 @@ int MainWindow::handle(int event) {
     return Fl_Double_Window::handle(event);
 }
 
-std::string MainWindow::line_for(const FileItem& it) const {
+std::string MainWindow::label_for(const FileItem& it) const {
     const char* st = "待轉";
-    char col[16] = "";
     switch (it.status) {
         case JobStatus::Pending: break;
-        case JobStatus::Running: snprintf(col, sizeof(col), "@C%d", (int)FL_BLUE); st = "轉換中"; break;
-        case JobStatus::Done: snprintf(col, sizeof(col), "@C%d", (int)FL_DARK_GREEN); st = "✔ 完成"; break;
-        case JobStatus::Failed: snprintf(col, sizeof(col), "@C%d", (int)FL_RED); st = "✘ 失敗"; break;
-        case JobStatus::Cancelled: snprintf(col, sizeof(col), "@C%d", (int)FL_DARK2); st = "已取消"; break;
+        case JobStatus::Running: st = "轉換中"; break;
+        case JobStatus::Done: st = "✔ 完成"; break;
+        case JobStatus::Failed: st = "✘ 失敗"; break;
+        case JobStatus::Cancelled: st = "已取消"; break;
     }
-    std::string path;
-    path.reserve(it.path_utf8.size());
-    for (char c : it.path_utf8) {   // escape browser format char
-        path += c;
-        if (c == '@') path += '@';
-    }
-    return std::string(it.checked ? "☑" : "☐") + "\t" + col + st + "\t" + path;
+    std::string name = it.root_utf8.empty()
+        ? it.path_utf8
+        : path_to_utf8(utf8_to_path(it.path_utf8).filename());
+    return std::string(it.checked ? "☑ " : "☐ ") + "[" + st + "] " + name;
 }
 
 void MainWindow::add_dropped(const std::string& text) {
@@ -242,20 +295,126 @@ void MainWindow::add_dropped(const std::string& text) {
 
 void MainWindow::add_paths(const std::vector<std::string>& paths_utf8) {
     if (converter_.running()) return;
-    for (const auto& f : collect_images(paths_utf8, recursive_->value() != 0)) {
-        if (!keys_.insert(lc_key(f)).second) continue;
-        FileItem it;
-        it.path_utf8 = f;
-        items_.push_back(std::move(it));
-        browser_->add(line_for(items_.back()).c_str());
+    bool rec = recursive_->value() != 0;
+    std::error_code ec;
+    bool added = false;
+    for (const auto& s : paths_utf8) {
+        fs::path rp = utf8_to_path(s).lexically_normal();
+        if (!rp.has_filename()) rp = rp.parent_path();   // strip trailing separator
+        std::string root = fs::is_directory(rp, ec) ? path_to_utf8(rp) : std::string();
+        for (const auto& f : collect_images({s}, rec)) {
+            if (!keys_.insert(lc_key(f)).second) continue;
+            FileItem it;
+            it.path_utf8 = f;
+            it.root_utf8 = root;
+            items_.push_back(std::move(it));
+            added = true;
+        }
     }
+    if (added) rebuild_tree();
+    else update_idle_status();
+}
+
+void MainWindow::rebuild_tree() {
+    // clear() would delete the root item itself, leaving root() NULL
+    tree_->clear_children(tree_->root());
+    leaf_.assign(items_.size(), nullptr);
+    std::map<std::wstring, Fl_Tree_Item*> dirs;
+    auto ensure_dir = [&](Fl_Tree_Item* parent, const fs::path& full,
+                          const std::string& label) {
+        std::wstring key = lc_key(path_to_utf8(full));
+        auto found = dirs.find(key);
+        if (found != dirs.end()) return found->second;
+        Fl_Tree_Item* n = tree_->add(parent, label.c_str());
+        dirs.emplace(key, n);
+        return n;
+    };
+    for (size_t i = 0; i < items_.size(); ++i) {
+        const FileItem& it = items_[i];
+        Fl_Tree_Item* parent = tree_->root();
+        if (!it.root_utf8.empty()) {
+            fs::path root = utf8_to_path(it.root_utf8);
+            parent = ensure_dir(parent, root, it.root_utf8);
+            fs::path rel = utf8_to_path(it.path_utf8).parent_path().lexically_relative(root);
+            fs::path acc = root;
+            for (const auto& comp : rel) {
+                if (comp.native() == L".") continue;
+                if (comp.native() == L"..") break;   // unexpected; keep under root
+                acc /= comp;
+                parent = ensure_dir(parent, acc, path_to_utf8(comp));
+            }
+        }
+        Fl_Tree_Item* li = tree_->add(parent, label_for(it).c_str());
+        li->user_data((void*)(intptr_t)(i + 1));
+        li->labelcolor(status_color(it.status));
+        leaf_[i] = li;
+    }
+    tree_->redraw();
     update_idle_status();
 }
 
-void MainWindow::rebuild_browser() {
-    browser_->clear();
-    for (const auto& it : items_) browser_->add(line_for(it).c_str());
+void MainWindow::refresh_leaf(int idx) {
+    if (idx < 0 || idx >= (int)leaf_.size() || !leaf_[idx]) return;
+    leaf_[idx]->label(label_for(items_[idx]).c_str());
+    leaf_[idx]->labelcolor(status_color(items_[idx].status));
+}
+
+void MainWindow::set_all_checked(bool checked) {
+    if (converter_.running()) return;
+    for (size_t i = 0; i < items_.size(); ++i) {
+        items_[i].checked = checked;
+        refresh_leaf((int)i);
+    }
+    tree_->redraw();
     update_idle_status();
+}
+
+void MainWindow::remove_items(const std::vector<int>& indices) {
+    if (indices.empty()) return;
+    std::unordered_set<int> del(indices.begin(), indices.end());
+    std::vector<FileItem> keep;
+    for (int i = 0; i < (int)items_.size(); ++i) {
+        if (del.count(i)) keys_.erase(lc_key(items_[i].path_utf8));
+        else keep.push_back(std::move(items_[i]));
+    }
+    items_ = std::move(keep);
+    rebuild_tree();
+}
+
+void MainWindow::show_context_menu(Fl_Tree_Item* item) {
+    if (converter_.running()) return;
+    int idx = leaf_index(item);
+    if (idx >= 0 && idx < (int)items_.size()) {
+        Fl_Menu_Item menu[] = {{"勾選/取消勾選"}, {"開啟所在資料夾"}, {"移除"}, {nullptr}};
+        const Fl_Menu_Item* pick = menu->popup(Fl::event_x(), Fl::event_y());
+        if (pick == menu + 0) {
+            items_[idx].checked = !items_[idx].checked;
+            refresh_leaf(idx);
+            tree_->redraw();
+            update_idle_status();
+        } else if (pick == menu + 1) {
+            open_in_explorer(items_[idx].path_utf8);
+        } else if (pick == menu + 2) {
+            remove_items({idx});
+        }
+    } else if (idx < 0) {
+        Fl_Menu_Item menu[] = {{"全部勾選"}, {"全部取消勾選"}, {"移除整個資料夾"}, {nullptr}};
+        const Fl_Menu_Item* pick = menu->popup(Fl::event_x(), Fl::event_y());
+        if (!pick) return;
+        std::vector<int> idxs;
+        collect_leaves(item, idxs);
+        if (pick == menu + 2) {
+            remove_items(idxs);
+        } else {
+            bool v = pick == menu + 0;
+            for (int i : idxs) {
+                items_[i].checked = v;
+                refresh_leaf(i);
+            }
+            tree_->redraw();
+            update_idle_status();
+        }
+    }
 }
 
 void MainWindow::update_idle_status() {
@@ -268,19 +427,25 @@ void MainWindow::update_idle_status() {
     status_box_->copy_label(buf);
 }
 
-void MainWindow::on_browser_click() {
-    int line = browser_->value();
-    if (line <= 0 || line > (int)items_.size()) return;
-    FileItem& it = items_[line - 1];
+void MainWindow::on_tree_event() {
+    if (tree_->callback_reason() != FL_TREE_REASON_SELECTED &&
+        tree_->callback_reason() != FL_TREE_REASON_RESELECTED)
+        return;
+    Fl_Tree_Item* item = tree_->callback_item();
+    if (!item) return;
+    int idx = leaf_index(item);
+    if (idx < 0 || idx >= (int)items_.size()) return;
+    FileItem& it = items_[idx];
     if (Fl::event_clicks() > 0) {
         if (it.status == JobStatus::Failed && !it.error_text.empty())
             fl_alert("%s", it.error_text.c_str());
         return;
     }
     if (converter_.running()) return;
-    if (Fl::event_x() <= browser_->x() + 24) {
+    if (Fl::event_x() <= item->x() + 22) {   // click on the checkbox glyph
         it.checked = !it.checked;
-        browser_->text(line, line_for(it).c_str());
+        refresh_leaf(idx);
+        tree_->redraw();
         update_idle_status();
     }
 }
@@ -300,7 +465,7 @@ void MainWindow::toggle_advanced() {
         adv_toggle_->label("詳細參數 ▸");
     }
     init_sizes();
-    resizable(browser_);
+    resizable(tree_);
     redraw();
 }
 
@@ -352,13 +517,14 @@ void MainWindow::start_conversion() {
         if (!items_[i].checked) continue;
         items_[i].status = JobStatus::Pending;
         items_[i].error_text.clear();
-        browser_->text((int)i + 1, line_for(items_[i]).c_str());
+        refresh_leaf((int)i);
         jobs.push_back({(int)i, items_[i].path_utf8});
     }
     if (jobs.empty()) {
         fl_alert("清單中沒有勾選的檔案");
         return;
     }
+    tree_->redraw();
     OutputSettings out{out_custom_->value() != 0, out_dir_utf8_};
     if (out.custom_dir) {
         if (out.dir_utf8.empty()) {
@@ -402,10 +568,10 @@ void MainWindow::on_msg(const Converter::Msg& m) {
         FileItem& it = items_[m.index];
         it.status = m.status;
         it.error_text = m.error;
-        int line = m.index + 1;
-        browser_->text(line, line_for(it).c_str());
-        if (m.status == JobStatus::Running && !browser_->displayed(line))
-            browser_->middleline(line);
+        refresh_leaf(m.index);
+        if (m.status == JobStatus::Running && leaf_[m.index] &&
+            !tree_->displayed(leaf_[m.index]))
+            tree_->show_item_middle(leaf_[m.index]);
     }
     progress_->value((float)m.processed);
     progress_->copy_label((std::to_string(m.processed) + "/" + std::to_string(m.total)).c_str());
