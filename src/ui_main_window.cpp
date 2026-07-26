@@ -37,6 +37,7 @@
 #include <unordered_set>
 
 #include "scanner.h"
+#include "theme.h"
 
 namespace fs = std::filesystem;
 
@@ -59,11 +60,13 @@ public:
 };
 
 namespace {
-constexpr int W = 640;
+constexpr int W = 680;
+constexpr int M = 12;                  // window margin
 constexpr int ADV_H = 164;
 constexpr int DH = ADV_H + 8;          // height delta when advanced panel toggles
-constexpr int BOTTOM_Y0 = 362;         // bottom group y when collapsed
-constexpr int H0 = BOTTOM_Y0 + 72 + 10;
+constexpr int BOTTOM_Y0 = 398;         // bottom group y when collapsed
+constexpr int AY = BOTTOM_Y0;          // advanced panel y offsets are relative to this
+constexpr int H0 = BOTTOM_Y0 + 70 + M;
 
 std::wstring lc_key(const std::string& utf8) {
     std::wstring w = utf8_to_wide(utf8);
@@ -74,10 +77,10 @@ std::wstring lc_key(const std::string& utf8) {
 
 Fl_Color status_color(JobStatus s) {
     switch (s) {
-        case JobStatus::Running: return FL_BLUE;
-        case JobStatus::Done: return FL_DARK_GREEN;
-        case JobStatus::Failed: return FL_RED;
-        case JobStatus::Cancelled: return FL_DARK2;
+        case JobStatus::Running: return kAccent;
+        case JobStatus::Done: return fl_rgb_color(24, 128, 56);
+        case JobStatus::Failed: return fl_rgb_color(217, 48, 37);
+        case JobStatus::Cancelled: return fl_rgb_color(107, 114, 128);
         default: return FL_FOREGROUND_COLOR;
     }
 }
@@ -99,93 +102,111 @@ void open_in_explorer(const std::string& path_utf8) {
 }  // namespace
 
 MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
-    toolbar_ = new Fl_Group(0, 0, W, 44);
-    auto* add_files = new Fl_Button(10, 8, 90, 28, "加入檔案");
-    auto* add_dir = new Fl_Button(106, 8, 100, 28, "加入資料夾");
-    auto* remove = new Fl_Button(212, 8, 90, 28, "移除勾選");
-    auto* clear = new Fl_Button(308, 8, 64, 28, "清空");
-    auto* sel_all = new Fl_Button(378, 8, 52, 28, "全選");
-    auto* sel_none = new Fl_Button(436, 8, 64, 28, "全不選");
-    recursive_ = new Fl_Check_Button(506, 8, 124, 28, "含子資料夾");
+    toolbar_ = new Fl_Group(0, 0, W, 48);
+    auto* add_files = new HoverButton(M, 9, 92, 30, "加入檔案");
+    auto* add_dir = new HoverButton(110, 9, 104, 30, "加入資料夾");
+    auto* remove = new HoverButton(220, 9, 92, 30, "移除勾選");
+    auto* clear = new HoverButton(318, 9, 64, 30, "清空");
+    auto* sel_all = new HoverButton(388, 9, 56, 30, "全選");
+    auto* sel_none = new HoverButton(450, 9, 68, 30, "全不選");
+    recursive_ = new Fl_Check_Button(526, 9, 130, 30, "含子資料夾");
     recursive_->value(1);
     toolbar_->end();
 
-    tree_ = new FileTree(10, 48, W - 20, 240);
+    tree_ = new FileTree(M, 52, W - 2 * M, 264);
     tree_->showroot(0);
     tree_->item_reselect_mode(FL_TREE_SELECTABLE_ALWAYS);
+    tree_->color(FL_BACKGROUND2_COLOR);
+    tree_->selection_color(fl_rgb_color(224, 234, 254));
+    tree_->connectorstyle(FL_TREE_CONNECTOR_NONE);
+    tree_->linespacing(6);
+    tree_->marginleft(8);
+    tree_->margintop(6);
     tree_->tooltip("點 ☐ 勾選/取消;右鍵有更多操作;雙擊失敗項目看錯誤訊息;可直接拖入檔案或資料夾");
 
-    quality_ = new Fl_Value_Slider(80, 296, W - 90, 24, "品質");
+    quality_ = new Fl_Value_Slider(M + 74, 328, W - 2 * M - 74, 26, "品質");
     quality_->type(FL_HOR_SLIDER);
     quality_->align(FL_ALIGN_LEFT);
     quality_->bounds(0, 100);
     quality_->step(1);
     quality_->value(90);
+    quality_->textsize(12);
+    quality_->color(fl_rgb_color(233, 236, 241));
+    quality_->selection_color(kAccent);   // knob
 
-    adv_toggle_ = new Fl_Toggle_Button(10, 328, 110, 26, "詳細參數 ▸");
+    adv_toggle_ = new Fl_Toggle_Button(M, 362, 110, 26, "詳細參數 ▸");
+    adv_toggle_->box(FL_NO_BOX);
+    adv_toggle_->labelcolor(kAccent);
+    adv_toggle_->align(FL_ALIGN_INSIDE | FL_ALIGN_LEFT);
 
-    adv_group_ = new Fl_Group(10, 362, W - 20, ADV_H);
-    adv_group_->box(FL_ENGRAVED_FRAME);
-    lossless_ = new Fl_Check_Button(24, 370, 100, 24, "-lossless");
-    nl_chk_ = new Fl_Check_Button(134, 370, 132, 24, "-near_lossless");
-    nl_val_ = new Fl_Spinner(268, 370, 64, 24);
+    adv_group_ = new Fl_Group(M, AY, W - 2 * M, ADV_H);
+    adv_group_->box(FL_UP_BOX);
+    adv_group_->color(fl_rgb_color(238, 241, 246));
+    lossless_ = new Fl_Check_Button(26, AY + 8, 100, 24, "-lossless");
+    nl_chk_ = new Fl_Check_Button(136, AY + 8, 132, 24, "-near_lossless");
+    nl_val_ = new Fl_Spinner(270, AY + 8, 64, 24);
     nl_val_->range(0, 100);
     nl_val_->value(60);
-    z_choice_ = new Fl_Choice(400, 370, 80, 24, "-z");
+    z_choice_ = new Fl_Choice(402, AY + 8, 80, 24, "-z");
     z_choice_->add("停用|0|1|2|3|4|5|6|7|8|9");
     z_choice_->value(0);
-    m_choice_ = new Fl_Choice(58, 402, 64, 24, "-m");
+    m_choice_ = new Fl_Choice(60, AY + 40, 64, 24, "-m");
     m_choice_->add("0|1|2|3|4|5|6");
     m_choice_->value(4);
-    preset_choice_ = new Fl_Choice(200, 402, 110, 24, "-preset");
+    preset_choice_ = new Fl_Choice(202, AY + 40, 110, 24, "-preset");
     preset_choice_->add("無|photo|picture|drawing|icon|text");
     preset_choice_->value(0);
-    meta_choice_ = new Fl_Choice(420, 402, 100, 24, "-metadata");
+    meta_choice_ = new Fl_Choice(422, AY + 40, 100, 24, "-metadata");
     meta_choice_->add("none|all|exif|icc|xmp");
     meta_choice_->value(0);
-    resize_chk_ = new Fl_Check_Button(24, 434, 84, 24, "-resize");
-    rw_ = new Fl_Int_Input(140, 434, 72, 24, "寬");
+    resize_chk_ = new Fl_Check_Button(26, AY + 72, 84, 24, "-resize");
+    rw_ = new Fl_Int_Input(142, AY + 72, 72, 24, "寬");
     rw_->value("0");
-    rh_ = new Fl_Int_Input(250, 434, 72, 24, "高");
+    rh_ = new Fl_Int_Input(252, AY + 72, 72, 24, "高");
     rh_->value("0");
-    auto* hint = new Fl_Box(330, 434, 160, 24, "(0 = 等比例)");
+    auto* hint = new Fl_Box(332, AY + 72, 160, 24, "(0 = 等比例)");
     hint->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
     hint->labelsize(12);
-    hint->labelcolor(FL_DARK2);
-    mt_ = new Fl_Check_Button(24, 466, 64, 24, "-mt");
+    hint->labelcolor(fl_rgb_color(107, 114, 128));
+    mt_ = new Fl_Check_Button(26, AY + 104, 64, 24, "-mt");
     mt_->value(1);
-    sharp_ = new Fl_Check_Button(98, 466, 110, 24, "-sharp_yuv");
-    aq_chk_ = new Fl_Check_Button(218, 466, 96, 24, "-alpha_q");
-    aq_val_ = new Fl_Spinner(316, 466, 64, 24);
+    sharp_ = new Fl_Check_Button(100, AY + 104, 110, 24, "-sharp_yuv");
+    aq_chk_ = new Fl_Check_Button(220, AY + 104, 96, 24, "-alpha_q");
+    aq_val_ = new Fl_Spinner(318, AY + 104, 64, 24);
     aq_val_->range(0, 100);
     aq_val_->value(100);
-    extra_ = new Fl_Input(110, 498, W - 144, 24, "額外參數");
+    extra_ = new Fl_Input(112, AY + 136, W - 112 - M - 20, 24, "額外參數");
     extra_->tooltip("以空白切分後直接附加給 cwebp;請勿放含空白的路徑");
     adv_group_->end();
     adv_group_->hide();
 
-    bottom_group_ = new Fl_Group(0, BOTTOM_Y0, W, 72);
-    out_same_ = new Fl_Round_Button(10, BOTTOM_Y0 + 4, 132, 24, "來源同資料夾");
+    bottom_group_ = new Fl_Group(0, BOTTOM_Y0, W, 70);
+    out_same_ = new Fl_Round_Button(M, BOTTOM_Y0 + 2, 134, 24, "來源同資料夾");
     out_same_->type(FL_RADIO_BUTTON);
     out_same_->value(1);
-    out_custom_ = new Fl_Round_Button(150, BOTTOM_Y0 + 4, 104, 24, "自訂資料夾");
+    out_custom_ = new Fl_Round_Button(152, BOTTOM_Y0 + 2, 106, 24, "自訂資料夾");
     out_custom_->type(FL_RADIO_BUTTON);
-    out_dir_ = new Fl_Output(258, BOTTOM_Y0 + 4, 288, 24);
-    out_browse_ = new Fl_Button(552, BOTTOM_Y0 + 4, 78, 24, "瀏覽…");
-    start_btn_ = new Fl_Button(10, BOTTOM_Y0 + 36, 104, 30, "開始轉換");
-    cancel_btn_ = new Fl_Button(122, BOTTOM_Y0 + 36, 72, 30, "取消");
+    out_dir_ = new Fl_Output(262, BOTTOM_Y0 + 2, 318, 24);
+    out_browse_ = new HoverButton(586, BOTTOM_Y0 + 2, 82, 24, "瀏覽…");
+    start_btn_ = new HoverButton(M, BOTTOM_Y0 + 34, 112, 32, "開始轉換");
+    start_btn_->color(kAccent);
+    start_btn_->labelcolor(FL_WHITE);
+    start_btn_->labelfont(FL_HELVETICA_BOLD);
+    cancel_btn_ = new HoverButton(132, BOTTOM_Y0 + 34, 76, 32, "取消");
     cancel_btn_->deactivate();
-    progress_ = new Fl_Progress(204, BOTTOM_Y0 + 36, 190, 30);
+    progress_ = new Fl_Progress(216, BOTTOM_Y0 + 34, 200, 32);
     progress_->minimum(0);
     progress_->maximum(1);
-    progress_->selection_color(FL_DARK_BLUE);
-    status_box_ = new Fl_Box(402, BOTTOM_Y0 + 36, 228, 30);
+    progress_->color(fl_rgb_color(229, 233, 240));
+    progress_->selection_color(kAccent);
+    status_box_ = new Fl_Box(426, BOTTOM_Y0 + 34, W - 426 - M, 32);
     status_box_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
     bottom_group_->end();
 
     end();
+    style_modern(this);
     resizable(tree_);
-    size_range(W, 420, W, 0);   // fixed width, vertical resize only
+    size_range(W, 440, W, 0);   // fixed width, vertical resize only
 
     add_files->callback([](Fl_Widget*, void* d) {
         auto* w = (MainWindow*)d;

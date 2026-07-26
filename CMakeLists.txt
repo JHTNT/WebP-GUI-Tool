@@ -20,6 +20,7 @@ add_executable(webp_gui WIN32
     src/main.cpp
     src/scanner.cpp
     src/cwebp_runner.cpp
+    src/theme.cpp
     src/ui_main_window.cpp)
 target_include_directories(webp_gui PRIVATE ${FLTK_INCLUDE_DIR})
 target_link_libraries(webp_gui PRIVATE ${FLTK_LIBRARY}
