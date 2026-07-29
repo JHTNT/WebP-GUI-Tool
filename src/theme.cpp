@@ -11,35 +11,31 @@ const Fl_Color kAccent = fl_rgb_color(37, 99, 235);
 namespace {
 const Fl_Color kBorder = fl_rgb_color(203, 208, 216);
 
-// flat rounded box; corners are pre-filled with the window background so
-// pixels outside the round shape never show garbage (menus, dialogs)
-void rounded(int x, int y, int w, int h, Fl_Color fill, Fl_Color line, int r) {
-    fl_color(Fl::box_color(FL_BACKGROUND_COLOR));
-    fl_rectf(x, y, w, h);
+void flat_box(int x, int y, int w, int h, Fl_Color fill, Fl_Color line) {
     fl_color(Fl::box_color(fill));
-    fl_rounded_rectf(x, y, w, h, r);
+    fl_rectf(x, y, w, h);
     fl_color(Fl::box_color(line));
-    fl_rounded_rect(x, y, w, h, r);
+    fl_rect(x, y, w, h);
 }
 void up_box(int x, int y, int w, int h, Fl_Color c) {
-    rounded(x, y, w, h, c, fl_color_average(c, FL_BLACK, 0.82f), 6);
+    flat_box(x, y, w, h, c, fl_color_average(c, FL_BLACK, 0.82f));
 }
 void down_box(int x, int y, int w, int h, Fl_Color c) {
-    rounded(x, y, w, h, c, kBorder, 6);
+    flat_box(x, y, w, h, c, kBorder);
 }
 void thin_up(int x, int y, int w, int h, Fl_Color c) {
-    rounded(x, y, w, h, c, fl_color_average(c, FL_BLACK, 0.82f), 3);
+    flat_box(x, y, w, h, c, fl_color_average(c, FL_BLACK, 0.82f));
 }
 void thin_down(int x, int y, int w, int h, Fl_Color c) {
-    rounded(x, y, w, h, c, kBorder, 3);
+    flat_box(x, y, w, h, c, kBorder);
 }
 void up_frame(int x, int y, int w, int h, Fl_Color c) {
     fl_color(Fl::box_color(fl_color_average(c, FL_BLACK, 0.82f)));
-    fl_rounded_rect(x, y, w, h, 6);
+    fl_rect(x, y, w, h);
 }
 void down_frame(int x, int y, int w, int h, Fl_Color) {
     fl_color(Fl::box_color(kBorder));
-    fl_rounded_rect(x, y, w, h, 6);
+    fl_rect(x, y, w, h);
 }
 void round_down(int x, int y, int w, int h, Fl_Color c) {
     fl_color(Fl::box_color(c));

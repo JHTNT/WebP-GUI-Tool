@@ -21,8 +21,8 @@ class Fl_Output;
 class Fl_Progress;
 class Fl_Round_Button;
 class Fl_Spinner;
+class Fl_Slider;
 class Fl_Toggle_Button;
-class Fl_Value_Slider;
 
 class MainWindow : public Fl_Double_Window {
 public:
@@ -60,7 +60,8 @@ private:
     Fl_Group* toolbar_;
     Fl_Check_Button* recursive_;
     FileTree* tree_;
-    Fl_Value_Slider* quality_;
+    Fl_Slider* quality_;
+    Fl_Box* quality_value_;
     Fl_Toggle_Button* adv_toggle_;
     Fl_Group* adv_group_;
     Fl_Check_Button* lossless_;

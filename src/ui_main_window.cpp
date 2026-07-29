@@ -17,12 +17,13 @@
 #include <FL/Fl_Output.H>
 #include <FL/Fl_Progress.H>
 #include <FL/Fl_Round_Button.H>
+#include <FL/Fl_Slider.H>
 #include <FL/Fl_Spinner.H>
 #include <FL/Fl_Toggle_Button.H>
 #include <FL/Fl_Tree.H>
 #include <FL/Fl_Tree_Item.H>
-#include <FL/Fl_Value_Slider.H>
 #include <FL/fl_ask.H>
+#include <FL/fl_draw.H>
 
 #include <algorithm>
 #include <cstdint>
@@ -56,6 +57,35 @@ public:
             return 1;
         }
         return Fl_Tree::handle(event);
+    }
+};
+
+class DetailToggle : public Fl_Toggle_Button {
+public:
+    using Fl_Toggle_Button::Fl_Toggle_Button;
+    void draw() override {
+        Fl_Toggle_Button::draw();
+        fl_color(active_r() ? labelcolor() : fl_inactive(labelcolor()));
+        const int cx = x() + 88;
+        const int cy = y() + h() / 2;
+        if (value())
+            fl_polygon(cx - 5, cy - 3, cx + 5, cy - 3, cx, cy + 4);
+        else
+            fl_polygon(cx - 3, cy - 5, cx - 3, cy + 5, cx + 4, cy);
+    }
+};
+
+class NoMouseFocusSlider : public Fl_Slider {
+public:
+    using Fl_Slider::Fl_Slider;
+    int handle(int event) override {
+        if (event != FL_PUSH) return Fl_Slider::handle(event);
+        const int visible_focus = Fl::visible_focus();
+        Fl::visible_focus(0);
+        if (Fl::focus() == this) Fl::focus(nullptr);
+        const int handled = Fl_Slider::handle(event);
+        Fl::visible_focus(visible_focus);
+        return handled;
     }
 };
 
@@ -122,19 +152,27 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     tree_->linespacing(6);
     tree_->marginleft(8);
     tree_->margintop(6);
-    tree_->tooltip("點 ☐ 勾選/取消;右鍵有更多操作;雙擊失敗項目看錯誤訊息;可直接拖入檔案或資料夾");
+    tree_->tooltip("可直接拖入檔案或資料夾\n"
+                   "點選 ☐ 可勾選或取消；右鍵可查看更多操作\n"
+                   "雙擊失敗項目可查看錯誤訊息");
 
-    quality_ = new Fl_Value_Slider(M + 74, 328, W - 2 * M - 74, 26, "品質");
+    auto* quality_label = new Fl_Box(M, 328, 44, 26, "品質");
+    quality_label->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+    quality_value_ = new Fl_Box(M + 46, 328, 44, 26, "90");
+    quality_value_->box(FL_DOWN_BOX);
+    quality_value_->color(FL_BACKGROUND2_COLOR);
+    quality_value_->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+    quality_value_->labelsize(12);
+    quality_ = new NoMouseFocusSlider(M + 100, 328, W - 2 * M - 100, 26);
     quality_->type(FL_HOR_SLIDER);
-    quality_->align(FL_ALIGN_LEFT);
     quality_->bounds(0, 100);
     quality_->step(1);
     quality_->value(90);
-    quality_->textsize(12);
     quality_->color(fl_rgb_color(233, 236, 241));
     quality_->selection_color(kAccent);   // knob
+    quality_->clear_visible_focus();
 
-    adv_toggle_ = new Fl_Toggle_Button(M, 362, 110, 26, "詳細參數 ▸");
+    adv_toggle_ = new DetailToggle(M, 362, 110, 26, "詳細參數");
     adv_toggle_->box(FL_NO_BOX);
     adv_toggle_->labelcolor(kAccent);
     adv_toggle_->align(FL_ALIGN_INSIDE | FL_ALIGN_LEFT);
@@ -176,7 +214,36 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     aq_val_->range(0, 100);
     aq_val_->value(100);
     extra_ = new Fl_Input(112, AY + 136, W - 112 - M - 20, 24, "額外參數");
-    extra_->tooltip("以空白切分後直接附加給 cwebp;請勿放含空白的路徑");
+    extra_->tooltip("參數會以空白分隔後附加至 cwebp\n"
+                    "不支援包含空白的路徑");
+
+    lossless_->tooltip("無損壓縮：保留所有像素資訊，通常檔案較大");
+    const char* near_lossless_tip =
+        "近無損預處理（0–100）\n"
+        "100 為關閉；數值越低，壓縮越強、失真越多";
+    nl_chk_->tooltip(near_lossless_tip);
+    nl_val_->tooltip(near_lossless_tip);
+    z_choice_->tooltip("無損壓縮快捷等級（0–9）\n"
+                       "0 最快，9 最慢且通常更小\n"
+                       "啟用後會取代品質、-m 與 -lossless");
+    m_choice_->tooltip("壓縮方法（0–6）\n"
+                       "0 最快，6 最慢且通常壓縮效果較好");
+    preset_choice_->tooltip("依影像類型套用 cwebp 建議參數\n"
+                            "畫面中的其他設定會在 preset 之後套用");
+    meta_choice_->tooltip("選擇要從來源保留的中繼資料\n"
+                          "none 不保留；all 全部保留；也可只保留 EXIF、ICC 或 XMP");
+    resize_chk_->tooltip("啟用輸出尺寸調整");
+    rw_->tooltip("輸出寬度（像素）\n0 代表依高度等比例計算");
+    rh_->tooltip("輸出高度（像素）\n0 代表依寬度等比例計算");
+    hint->tooltip("寬或高設為 0 時，會依另一邊等比例計算");
+    mt_->tooltip("使用多執行緒編碼（硬體支援時可加快速度）");
+    sharp_->tooltip("使用較銳利但較慢的 RGB 轉 YUV 計算\n"
+                    "通常能改善細節與邊緣");
+    const char* alpha_q_tip =
+        "透明度壓縮品質（0–100）\n"
+        "數值越高，透明邊緣品質越好；預設 100";
+    aq_chk_->tooltip(alpha_q_tip);
+    aq_val_->tooltip(alpha_q_tip);
     adv_group_->end();
     adv_group_->hide();
 
@@ -247,6 +314,11 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
     sel_none->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->set_all_checked(false); }, this);
     tree_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->on_tree_event(); }, this);
     tree_->on_rclick = [this](Fl_Tree_Item* it) { show_context_menu(it); };
+    quality_->callback([](Fl_Widget* w, void* d) {
+        char value[8];
+        snprintf(value, sizeof(value), "%.0f", ((Fl_Slider*)w)->value());
+        ((Fl_Box*)d)->copy_label(value);
+    }, quality_value_);
     adv_toggle_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->toggle_advanced(); }, this);
     z_choice_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->apply_z_state(); }, this);
     out_browse_->callback([](Fl_Widget*, void* d) { ((MainWindow*)d)->browse_output_dir(); }, this);
@@ -264,7 +336,6 @@ MainWindow::MainWindow() : Fl_Double_Window(W, H0, "WebP 批量轉換") {
         status_box_->label("找不到 cwebp,請安裝並加入 PATH");
         start_btn_->deactivate();
     } else {
-        status_box_->copy_tooltip(cwebp_path_.c_str());
         update_idle_status();
     }
 }
@@ -478,12 +549,10 @@ void MainWindow::toggle_advanced() {
         adv_group_->position(adv_group_->x(), bottom_group_->y());
         adv_group_->show();
         bottom_group_->position(bottom_group_->x(), bottom_group_->y() + DH);
-        adv_toggle_->label("詳細參數 ▾");
     } else {
         adv_group_->hide();
         bottom_group_->position(bottom_group_->x(), bottom_group_->y() - DH);
         size(w(), h() - DH);
-        adv_toggle_->label("詳細參數 ▸");
     }
     init_sizes();
     resizable(tree_);
